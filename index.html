@@ -602,9 +602,10 @@ function buildModel(rows) {
   const byLevel     = groupBy(closed, r => r[COL.LEVEL]);
   const byDept      = groupBy(closed, r => r[COL.DEPT]);
   const byRegion    = groupBy(closed, r => r[COL.REGION]);
-  const byRole      = groupBy(closed, r => r[COL.ROLE]);
+  const byRole      = groupBy(closed, r => normRole(r[COL.ROLE] || ''));
   const byRegLvl    = groupBy(closed, r => r[COL.REGION] + '|' + r[COL.LEVEL]);
-  const byDeptRole  = groupBy(closed, r => r[COL.DEPT] + '||' + r[COL.ROLE]);
+  // Normalise role key so "Principal Growth Consultant" / "principal growth consultant" / trailing-space variants all collapse into one entry
+  const byDeptRole  = groupBy(closed, r => r[COL.DEPT] + '||' + normRole(r[COL.ROLE] || ''));
 
   function ttfStats(rows) {
     const vals = rows.map(r => parseFloat(r[COL.TTF])).filter(v => !isNaN(v));
@@ -634,7 +635,8 @@ function buildModel(rows) {
   // Role-level lookup (by dept)
   const rolesByDept = {};
   Object.entries(byDeptRole).forEach(([key, rows]) => {
-    const [dept, role] = key.split('||');
+    const [dept] = key.split('||');
+    const role = (rows[0][COL.ROLE] || '').trim(); // use first row's name as canonical display name
     if (!dept || !role) return;
     if (!rolesByDept[dept]) rolesByDept[dept] = {};
 
@@ -1039,15 +1041,16 @@ function runPrediction() {
 
   // Comparables — pull from raw data, prioritising same dept before going cross-dept
   const allClosed = MODEL.allClosed;
-  // 1. Exact role match (any region)
-  let comps = allClosed.filter(r => r[COL.ROLE] === roleName && parseFloat(r[COL.TTF]) > 0);
+  // 1. Exact role match (any region) — normalised so minor case/space variants still match
+  const normRoleName = normRole(roleName);
+  let comps = allClosed.filter(r => normRole(r[COL.ROLE]||'') === normRoleName && parseFloat(r[COL.TTF]) > 0);
   // 2. If still < 3, add same dept + same level (different role)
   if (comps.length < 3 && dept && effLevel) {
     const seen = new Set(comps.map((_, i) => i));
     const extra = allClosed.filter(r =>
       r[COL.DEPT] === dept &&
       r[COL.LEVEL] === effLevel &&
-      r[COL.ROLE] !== roleName &&
+      normRole(r[COL.ROLE]||'') !== normRoleName &&
       parseFloat(r[COL.TTF]) > 0
     );
     comps = [...comps, ...extra];
@@ -1057,7 +1060,7 @@ function runPrediction() {
     const inComps = new Set(comps.map(r => r[COL.ROLE] + r[COL.TTF]));
     const extra = allClosed.filter(r =>
       r[COL.DEPT] === dept &&
-      r[COL.ROLE] !== roleName &&
+      normRole(r[COL.ROLE]||'') !== normRoleName &&
       parseFloat(r[COL.TTF]) > 0 &&
       !inComps.has(r[COL.ROLE] + r[COL.TTF])
     );
