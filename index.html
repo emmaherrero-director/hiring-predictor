@@ -715,12 +715,16 @@ function buildEmployeeModel(rows) {
   const salByRole   = {};
   const rolesByDept = {};
 
-  // Detect if this is a pre-aggregated summary sheet (has avg/min/max/count columns)
-  const isSummary = ECOL.AVG !== -1 && ECOL.MIN !== -1 && ECOL.MAX !== -1;
-  console.log('[EmpModel] isSummary:', isSummary, '| countCol before fallback:', ECOL.COUNT);
+  // Detect if this is a pre-aggregated summary sheet.
+  // Require only MIN + MAX — the avg column may be named "Salary", "Mean", etc.
+  const isSummary = ECOL.MIN !== -1 && ECOL.MAX !== -1;
 
-  // If isSummary but COUNT not detected by keyword, find it positionally:
-  // look for a column after MAX containing small whole numbers (headcount values)
+  // Use AVG column if present, otherwise fall back to SALARY column for the average value
+  const avgCol = ECOL.AVG !== -1 ? ECOL.AVG : ECOL.SALARY;
+
+  console.log('[EmpModel] isSummary:', isSummary, '| avgCol:', avgCol, '| countCol (keyword):', ECOL.COUNT);
+
+  // Resolve count column: keyword match, or positional scan for small integers after MAX
   let countCol = ECOL.COUNT;
   if (isSummary && countCol === -1 && ECOL.MAX !== -1) {
     const sampleRows = data.slice(0, Math.min(8, data.length));
@@ -751,7 +755,7 @@ function buildEmployeeModel(rows) {
     data.forEach(r => {
       const role  = cleanStr(r[ECOL.ROLE]);
       if (!role) return;
-      const avg   = cleanNum(r[ECOL.AVG]);
+      const avg   = cleanNum(r[avgCol]);
       const min   = cleanNum(r[ECOL.MIN]);
       const max   = cleanNum(r[ECOL.MAX]);
       const count = countCol !== -1 ? (parseInt(r[countCol]) || 0) : 1;
