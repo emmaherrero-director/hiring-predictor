@@ -666,183 +666,78 @@ function buildModel(rows) {
 }
 
 // ─── EMPLOYEE SALARY MODEL ───────────────────────────────────────────────────
-function detectEmployeeColumns(header) {
-  const h = header.map(c => c.toLowerCase().replace(/[\t\r]+/g,'').trim());
-  function find(keywords) {
-    for (let i = 0; i < h.length; i++) {
-      if (keywords.some(kw => h[i].includes(kw))) return i;
-    }
-    return -1;
-  }
-  return {
-    ROLE:   find(['role']),
-    DEPT:   find(['department','dept']),
-    LEVEL:  find(['level']),
-    REGION: find(['region']),
-    SALARY: find(['salary']),
-    AVG:    find(['avg','average']),
-    MIN:    find(['min']),
-    MAX:    find(['max']),
-    COUNT:  find(['#','count','employees','headcount','staff','total','qty','num','nº','n°','nbr']),
-  };
-}
 
 function cleanNum(v) {
   return parseFloat((v||'').toString().replace(/[€£$\s,]/g,''));
 }
 
 function buildEmployeeModel(rows) {
-  // Scan first 5 rows to find the real header row (sheet may have a title row above headers)
+  // Find the header row — first row that contains a cell with 'role' in it
   let headerIdx = 0;
   for (let i = 0; i < Math.min(5, rows.length); i++) {
-    const test = detectEmployeeColumns(rows[i]);
-    if (test.ROLE !== -1 && (test.SALARY !== -1 || test.AVG !== -1)) {
-      headerIdx = i;
-      break;
-    }
+    if (rows[i].some(c => (c||'').toLowerCase().includes('role'))) { headerIdx = i; break; }
   }
-  const header = rows[headerIdx];
-  const ECOL   = detectEmployeeColumns(header);
-  const data   = rows.slice(headerIdx + 1).filter(r => r.some(c => (c||'').trim()));
 
-  // ── DEBUG ──────────────────────────────────────────────────────────────────
-  console.log('[EmpModel] headerIdx:', headerIdx);
-  console.log('[EmpModel] header row:', header);
-  console.log('[EmpModel] detected columns:', JSON.stringify(ECOL));
-  console.log('[EmpModel] first 3 data rows:', data.slice(0,3));
-  // ───────────────────────────────────────────────────────────────────────────
+  const hdr  = rows[headerIdx].map(c => (c||'').toLowerCase().replace(/\s+/g,' ').trim());
+  const data = rows.slice(headerIdx + 1).filter(r => r.some(c => (c||'').trim()));
+
+  // Map each column by keyword — returns index of first matching header cell
+  function col(kws) {
+    for (let i = 0; i < hdr.length; i++)
+      if (kws.some(kw => hdr[i].includes(kw))) return i;
+    return -1;
+  }
+
+  const ROLE  = col(['role','title','position','job']);
+  const AVG   = col(['avg','average','mean','salary','sal']);
+  const MIN   = col(['min']);
+  const MAX   = col(['max']);
+  const DEPT  = col(['dept','department','team']);
+  const LEVEL = col(['level','seniority','grade']);
+  // Count column: keyword match, or the column immediately after MAX (column E in standard layout)
+  const CNT   = col(['#','count','employee','headcount','staff','nº','n°','num','total','qty']);
+  const countCol = CNT !== -1 ? CNT : (MAX !== -1 && MAX + 1 < hdr.length ? MAX + 1 : -1);
+
+  function clean(v) {
+    const s = (v||'').toString().replace(/\s+/g,' ').trim();
+    return (!s || s.startsWith('#') || s === '—') ? '' : s;
+  }
 
   const salByRole   = {};
   const rolesByDept = {};
 
-  // Detect if this is a pre-aggregated summary sheet.
-  // Require only MIN + MAX — the avg column may be named "Salary", "Mean", etc.
-  const isSummary = ECOL.MIN !== -1 && ECOL.MAX !== -1;
+  // The sheet is already a summary — read each row directly as one role entry
+  data.forEach(r => {
+    const role  = clean(r[ROLE]);
+    if (!role) return;
+    const avg   = cleanNum(r[AVG]);
+    const min   = cleanNum(r[MIN]);
+    const max   = cleanNum(r[MAX]);
+    const count = countCol !== -1 ? (parseInt(r[countCol]) || 0) : 0;
+    const dept  = DEPT  !== -1 ? clean(r[DEPT])  : '';
+    const level = LEVEL !== -1 ? clean(r[LEVEL]) : '';
 
-  // Use AVG column if present, otherwise fall back to SALARY column for the average value
-  const avgCol = ECOL.AVG !== -1 ? ECOL.AVG : ECOL.SALARY;
-
-  console.log('[EmpModel] isSummary:', isSummary, '| avgCol:', avgCol, '| countCol (keyword):', ECOL.COUNT);
-
-  // Resolve count column — three attempts:
-  // 1. Keyword match (e.g. "#Employees", "Count", "Headcount")
-  // 2. Positional scan: first column after MAX whose values are all small whole numbers
-  // 3. Hard fallback: the column immediately after MAX (column E in a standard 7-col summary)
-  let countCol = ECOL.COUNT;
-  if (isSummary && countCol === -1 && ECOL.MAX !== -1) {
-    const sampleRows = data.slice(0, Math.min(8, data.length));
-    for (let ci = ECOL.MAX + 1; ci < header.length; ci++) {
-      if (ci === ECOL.DEPT || ci === ECOL.LEVEL || ci === ECOL.REGION) continue;
-      const vals = sampleRows.map(r => {
-        const raw = (r[ci] || '').toString().replace(/[^0-9.]/g, '');
-        return raw ? parseFloat(raw) : NaN;
-      }).filter(v => !isNaN(v));
-      const smallInts = vals.filter(v => v >= 0 && v < 5000 && Number.isInteger(v));
-      if (vals.length > 0 && smallInts.length >= Math.ceil(vals.length * 0.5)) {
-        countCol = ci;
-        break;
-      }
+    if (!isNaN(avg) && avg > 0) {
+      salByRole[role] = {
+        mean:  avg,
+        min:   isNaN(min) || min === 0 ? avg : min,
+        max:   isNaN(max) || max === 0 ? avg : max,
+        count, dept, level
+      };
     }
-    // Hard fallback: column right after MAX, as long as it isn't dept/level
-    if (countCol === -1) {
-      const fallback = ECOL.MAX + 1;
-      if (fallback < header.length && fallback !== ECOL.DEPT && fallback !== ECOL.LEVEL) {
-        countCol = fallback;
-      }
+    if (dept) {
+      if (!rolesByDept[dept]) rolesByDept[dept] = new Set();
+      rolesByDept[dept].add(role);
     }
-  }
+  });
 
-  console.log('[EmpModel] countCol after fallback:', countCol);
-
-  // Helper: clean a string value, reject Google Sheets error strings
-  function cleanStr(v) {
-    const s = (v || '').toString().replace(/\s+/g, ' ').trim();
-    if (!s || s.startsWith('#') || s === '—') return '';
-    return s;
-  }
-
-  if (isSummary) {
-    // Summary tab format: Role | Avg Salary | Min | Max | # Employees | Department | Level
-    data.forEach(r => {
-      const role  = cleanStr(r[ECOL.ROLE]);
-      if (!role) return;
-      const avg   = cleanNum(r[avgCol]);
-      const min   = cleanNum(r[ECOL.MIN]);
-      const max   = cleanNum(r[ECOL.MAX]);
-      const count = countCol !== -1 ? (parseInt(r[countCol]) || 0) : 1;
-      const dept  = ECOL.DEPT  !== -1 ? cleanStr(r[ECOL.DEPT])  : '';
-      const level = ECOL.LEVEL !== -1 ? cleanStr(r[ECOL.LEVEL]) : '';
-      if (!isNaN(avg) && avg > 0) {
-        if (salByRole[role]) {
-          // Aggregate: Summary may have one row per level — combine them
-          const ex = salByRole[role];
-          const tot = ex.count + count;
-          salByRole[role] = {
-            mean: tot > 0 ? (ex.mean * ex.count + avg * count) / tot : avg,
-            min:  Math.min(ex.min, isNaN(min)||min===0 ? avg : min),
-            max:  Math.max(ex.max, isNaN(max)||max===0 ? avg : max),
-            count: tot, dept: ex.dept || dept, level: ex.level || level
-          };
-        } else {
-          salByRole[role] = { mean: avg, min: isNaN(min)||min===0 ? avg : min,
-            max: isNaN(max)||max===0 ? avg : max, count, dept, level };
-        }
-      }
-      // Build rolesByDept — only if dept is a real value (not #N/A etc.)
-      if (dept) {
-        if (!rolesByDept[dept]) rolesByDept[dept] = new Set();
-        rolesByDept[dept].add(role);
-      }
-    });
-  } else {
-    // Individual employee rows — count ALL rows per role; use last salary column found
-    // (prefer Salary EUR / rightmost salary column for currency consistency)
-    const salCol = (() => {
-      const h2 = header.map(c => (c||'').toLowerCase());
-      // prefer a column containing both 'salary' and 'eur', else last column containing 'salary'
-      let best = -1;
-      for (let i = 0; i < h2.length; i++) {
-        if (h2[i].includes('salary') || h2[i].includes('sal')) best = i;
-      }
-      return best !== -1 ? best : ECOL.SALARY;
-    })();
-    const byRole = {};
-    data.forEach(r => {
-      const role = (r[ECOL.ROLE] || '').trim();
-      const dept = (r[ECOL.DEPT] || '').trim();
-      const sal  = cleanNum(r[salCol !== -1 ? salCol : ECOL.SALARY]);
-      if (!role) return;
-      if (!byRole[role]) byRole[role] = { sals: [], rows: 0, dept };
-      byRole[role].rows++;                               // count every row
-      if (!isNaN(sal) && sal > 0) byRole[role].sals.push(sal);
-      if (dept) {
-        if (!rolesByDept[dept]) rolesByDept[dept] = new Set();
-        rolesByDept[dept].add(role);
-      }
-    });
-    Object.entries(byRole).forEach(([role, d]) => {
-      if (!d.rows) return;
-      const sals = d.sals.length ? d.sals : [0];
-      salByRole[role] = { mean: mean(sals), min: Math.min(...sals),
-        max: Math.max(...sals), count: d.rows };         // count = total employees
-    });
-  }
-
-  // No merging — roles are used exactly as written in the sheet
-
-  // Convert rolesByDept Sets → sorted arrays
   const rolesByDeptArr = {};
   Object.entries(rolesByDept).forEach(([d, s]) => { rolesByDeptArr[d] = [...s].sort(); });
-
   const allRoles = Object.keys(salByRole).sort();
   const allDepts = Object.keys(rolesByDeptArr).sort();
+  const totalHeadcount = Object.values(salByRole).reduce((s, d) => s + (d.count || 0), 0);
 
-  // Total headcount: sum the count column if available (summary sheet), otherwise row count
-  const totalHeadcount = isSummary && countCol !== -1
-    ? Object.values(salByRole).reduce((s, d) => s + (d.count || 0), 0)
-    : data.length;
-
-  return { salByRole, rolesByDept: rolesByDeptArr, allRoles, allDepts, count: totalHeadcount, isSummary };
+  return { salByRole, rolesByDept: rolesByDeptArr, allRoles, allDepts, count: totalHeadcount, isSummary: true };
 }
 
 // ─── ROLE NAME NORMALIZATION (module-level) ───────────────────────────────────
