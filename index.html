@@ -951,8 +951,10 @@ function runPrediction() {
   // Current Team Salary card
   const empCard = document.getElementById('emp-sal-card');
   if (EMP_MODEL && roleName) {
-      // Match using module-level normRole / rolesMatch (exact → normalised → level-stripped)
-    const roleKey = Object.keys(EMP_MODEL.salByRole).find(k => rolesMatch(k, roleName));
+      // Exact match only — role names are already clean and aligned between sheets
+    const roleKey = Object.keys(EMP_MODEL.salByRole).find(k =>
+      k.toLowerCase().trim() === roleName.toLowerCase().trim()
+    );
     const empData = roleKey ? EMP_MODEL.salByRole[roleKey] : null;
     if (empData && !isNaN(empData.mean) && empData.mean > 0) {
       empCard.style.display = 'block';
