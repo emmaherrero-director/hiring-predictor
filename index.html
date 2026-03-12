@@ -724,7 +724,10 @@ function buildEmployeeModel(rows) {
 
   console.log('[EmpModel] isSummary:', isSummary, '| avgCol:', avgCol, '| countCol (keyword):', ECOL.COUNT);
 
-  // Resolve count column: keyword match, or positional scan for small integers after MAX
+  // Resolve count column — three attempts:
+  // 1. Keyword match (e.g. "#Employees", "Count", "Headcount")
+  // 2. Positional scan: first column after MAX whose values are all small whole numbers
+  // 3. Hard fallback: the column immediately after MAX (column E in a standard 7-col summary)
   let countCol = ECOL.COUNT;
   if (isSummary && countCol === -1 && ECOL.MAX !== -1) {
     const sampleRows = data.slice(0, Math.min(8, data.length));
@@ -734,9 +737,17 @@ function buildEmployeeModel(rows) {
         const raw = (r[ci] || '').toString().replace(/[^0-9.]/g, '');
         return raw ? parseFloat(raw) : NaN;
       }).filter(v => !isNaN(v));
-      if (vals.length > 0 && vals.every(v => v >= 0 && v < 5000 && Number.isInteger(v))) {
+      const smallInts = vals.filter(v => v >= 0 && v < 5000 && Number.isInteger(v));
+      if (vals.length > 0 && smallInts.length >= Math.ceil(vals.length * 0.5)) {
         countCol = ci;
         break;
+      }
+    }
+    // Hard fallback: column right after MAX, as long as it isn't dept/level
+    if (countCol === -1) {
+      const fallback = ECOL.MAX + 1;
+      if (fallback < header.length && fallback !== ECOL.DEPT && fallback !== ECOL.LEVEL) {
+        countCol = fallback;
       }
     }
   }
@@ -784,14 +795,25 @@ function buildEmployeeModel(rows) {
       }
     });
   } else {
-    // Individual employee rows format: Role | Dept | Level | Region | Salary
+    // Individual employee rows — count ALL rows per role; use last salary column found
+    // (prefer Salary EUR / rightmost salary column for currency consistency)
+    const salCol = (() => {
+      const h2 = header.map(c => (c||'').toLowerCase());
+      // prefer a column containing both 'salary' and 'eur', else last column containing 'salary'
+      let best = -1;
+      for (let i = 0; i < h2.length; i++) {
+        if (h2[i].includes('salary') || h2[i].includes('sal')) best = i;
+      }
+      return best !== -1 ? best : ECOL.SALARY;
+    })();
     const byRole = {};
     data.forEach(r => {
       const role = (r[ECOL.ROLE] || '').trim();
       const dept = (r[ECOL.DEPT] || '').trim();
-      const sal  = cleanNum(r[ECOL.SALARY]);
+      const sal  = cleanNum(r[salCol !== -1 ? salCol : ECOL.SALARY]);
       if (!role) return;
-      if (!byRole[role]) byRole[role] = { sals: [], dept };
+      if (!byRole[role]) byRole[role] = { sals: [], rows: 0, dept };
+      byRole[role].rows++;                               // count every row
       if (!isNaN(sal) && sal > 0) byRole[role].sals.push(sal);
       if (dept) {
         if (!rolesByDept[dept]) rolesByDept[dept] = new Set();
@@ -799,9 +821,10 @@ function buildEmployeeModel(rows) {
       }
     });
     Object.entries(byRole).forEach(([role, d]) => {
-      if (!d.sals.length) return;
-      salByRole[role] = { mean: mean(d.sals), min: Math.min(...d.sals),
-        max: Math.max(...d.sals), count: d.sals.length };
+      if (!d.rows) return;
+      const sals = d.sals.length ? d.sals : [0];
+      salByRole[role] = { mean: mean(sals), min: Math.min(...sals),
+        max: Math.max(...sals), count: d.rows };         // count = total employees
     });
   }
 
