@@ -791,27 +791,7 @@ function buildEmployeeModel(rows) {
     });
   }
 
-  // Merge "Role Name ClientSuffix" variants into their base role
-  // e.g. "Senior Growth Consultant Pressplay" → "Senior Growth Consultant"
-  // Sort shortest-first so base roles are processed before their variants
-  Object.keys(salByRole).sort((a,b) => a.length - b.length).forEach(baseRole => {
-    if (!salByRole[baseRole]) return;
-    const baseLower = baseRole.toLowerCase();
-    Object.keys(salByRole).forEach(variant => {
-      if (variant === baseRole || !salByRole[variant]) return;
-      if (variant.toLowerCase().startsWith(baseLower + ' ')) {
-        const b = salByRole[baseRole], v = salByRole[variant];
-        const tot = b.count + v.count;
-        salByRole[baseRole] = {
-          mean:  tot > 0 ? (b.mean * b.count + v.mean * v.count) / tot : b.mean,
-          min:   Math.min(b.min, v.min),
-          max:   Math.max(b.max, v.max),
-          count: tot, dept: b.dept || v.dept, level: b.level || v.level
-        };
-        delete salByRole[variant];
-      }
-    });
-  });
+  // No merging — roles are used exactly as written in the sheet
 
   // Convert rolesByDept Sets → sorted arrays
   const rolesByDeptArr = {};
