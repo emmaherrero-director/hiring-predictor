@@ -977,12 +977,22 @@ function runPrediction() {
   const empCard = document.getElementById('emp-sal-card');
   if (EMP_MODEL && roleName) {
     // Try exact match first, then case-insensitive fallback
+    // Normalize: lowercase, strip punctuation/extra spaces for fuzzy matching
+    function normRole(s) { return (s||'').toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim(); }
+    // Strip leading/trailing level words so "Senior Growth Consultant" matches "Growth Consultant"
+    const levelPrefixes = /^(junior|mid|middle|senior|lead|strategic lead|director|principal|head|vp|executive)\s+/i;
+    const levelSuffixes = /\s+(junior|mid|middle|senior|lead|director|principal|head|vp|executive)$/i;
+    function stripLevel(s) { return normRole(s).replace(levelPrefixes,'').replace(levelSuffixes,'').trim(); }
+    const normTarget    = normRole(roleName);
+    const strippedTarget = stripLevel(roleName);
     const roleKey = Object.keys(EMP_MODEL.salByRole).find(k =>
       k === roleName ||
-      k.toLowerCase().trim() === roleName.toLowerCase().trim()
+      k.toLowerCase().trim() === roleName.toLowerCase().trim() ||
+      normRole(k) === normTarget ||
+      stripLevel(k) === strippedTarget
     );
     const empData = roleKey ? EMP_MODEL.salByRole[roleKey] : null;
-    if (empData && empData.count > 0 && empData.mean !== null) {
+    if (empData && !isNaN(empData.mean) && empData.mean > 0) {
       empCard.style.display = 'block';
       document.getElementById('emp-sal-value').textContent = '€' + fmt(empData.mean);
       document.getElementById('emp-sal-unit').textContent  = 'EUR · current team average · ' + empData.count + ' employee' + (empData.count !== 1 ? 's' : '');
