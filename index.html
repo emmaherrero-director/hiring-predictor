@@ -705,11 +705,19 @@ function buildEmployeeModel(rows) {
   const ECOL   = detectEmployeeColumns(header);
   const data   = rows.slice(headerIdx + 1).filter(r => r.some(c => (c||'').trim()));
 
+  // ── DEBUG ──────────────────────────────────────────────────────────────────
+  console.log('[EmpModel] headerIdx:', headerIdx);
+  console.log('[EmpModel] header row:', header);
+  console.log('[EmpModel] detected columns:', JSON.stringify(ECOL));
+  console.log('[EmpModel] first 3 data rows:', data.slice(0,3));
+  // ───────────────────────────────────────────────────────────────────────────
+
   const salByRole   = {};
   const rolesByDept = {};
 
   // Detect if this is a pre-aggregated summary sheet (has avg/min/max/count columns)
   const isSummary = ECOL.AVG !== -1 && ECOL.MIN !== -1 && ECOL.MAX !== -1;
+  console.log('[EmpModel] isSummary:', isSummary, '| countCol before fallback:', ECOL.COUNT);
 
   // If isSummary but COUNT not detected by keyword, find it positionally:
   // look for a column after MAX containing small whole numbers (headcount values)
@@ -728,6 +736,8 @@ function buildEmployeeModel(rows) {
       }
     }
   }
+
+  console.log('[EmpModel] countCol after fallback:', countCol);
 
   // Helper: clean a string value, reject Google Sheets error strings
   function cleanStr(v) {
