@@ -829,23 +829,13 @@ function onDeptChange() {
   const roleEl = document.getElementById('sel-role');
   roleEl.innerHTML = '';
 
-  const hiringRoles     = (dept && MODEL.rolesByDept[dept]) ? MODEL.rolesByDept[dept] : {};
-  const hiringRoleNames = Object.keys(hiringRoles);
-  const empRolesRaw     = (dept && EMP_MODEL && EMP_MODEL.rolesByDept[dept]) ? EMP_MODEL.rolesByDept[dept] : [];
+  const hiringRoles = (dept && MODEL.rolesByDept[dept]) ? MODEL.rolesByDept[dept] : {};
+  const empRolesRaw = (dept && EMP_MODEL && EMP_MODEL.rolesByDept[dept]) ? EMP_MODEL.rolesByDept[dept] : [];
 
-  // Build entries: value = hiring role name (for lookups), display = employee name if available
-  const entries = [];
-  hiringRoleNames.forEach(hr => {
-    const empMatch = empRolesRaw.find(er => rolesMatch(er, hr));
-    const hData    = hiringRoles[hr];
-    entries.push({ value: hr, display: empMatch || hr, n: hData ? hData.n : 0 });
-  });
-  // Employee-only roles (no matching hiring role)
-  empRolesRaw.filter(er => !hiringRoleNames.some(hr => rolesMatch(er, hr)))
-    .forEach(er => entries.push({ value: er, display: er, n: 0 }));
-  entries.sort((a, b) => a.display.localeCompare(b.display));
+  // Merge by exact name — names are consistent across both sheets
+  const allRoleNames = [...new Set([...Object.keys(hiringRoles), ...empRolesRaw])].sort();
 
-  if (!entries.length) {
+  if (!allRoleNames.length) {
     roleEl.innerHTML = '<option value="">Select department first</option>';
     roleEl.disabled  = true;
     return;
@@ -854,11 +844,12 @@ function onDeptChange() {
   roleEl.disabled = false;
   addOption(roleEl, '', 'All roles in dept');
 
-  entries.forEach(({ value, display, n }) => {
-    const opt       = document.createElement('option');
-    opt.value       = value; // hiring role name → keeps all prediction lookups working
-    const hireHint  = n > 0 ? ' [' + n + ' hire' + (n !== 1 ? 's' : '') + ']' : ' [no past hires]';
-    opt.textContent = display + hireHint; // employee-style name as display
+  allRoleNames.forEach(roleName => {
+    const hData    = hiringRoles[roleName];
+    const opt      = document.createElement('option');
+    opt.value      = roleName;
+    const hireHint = hData && hData.n > 0 ? ' [' + hData.n + ' hire' + (hData.n !== 1 ? 's' : '') + ']' : ' [no past hires]';
+    opt.textContent = roleName + hireHint;
     roleEl.appendChild(opt);
   });
 
