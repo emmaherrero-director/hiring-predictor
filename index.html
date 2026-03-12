@@ -730,8 +730,20 @@ function buildEmployeeModel(rows) {
       const dept  = ECOL.DEPT  !== -1 ? cleanStr(r[ECOL.DEPT])  : '';
       const level = ECOL.LEVEL !== -1 ? cleanStr(r[ECOL.LEVEL]) : '';
       if (!isNaN(avg) && avg > 0) {
-        salByRole[role] = { mean: avg, min: isNaN(min)||min===0 ? avg : min,
-          max: isNaN(max)||max===0 ? avg : max, count, dept, level };
+        if (salByRole[role]) {
+          // Aggregate: Summary may have one row per level — combine them
+          const ex = salByRole[role];
+          const tot = ex.count + count;
+          salByRole[role] = {
+            mean: tot > 0 ? (ex.mean * ex.count + avg * count) / tot : avg,
+            min:  Math.min(ex.min, isNaN(min)||min===0 ? avg : min),
+            max:  Math.max(ex.max, isNaN(max)||max===0 ? avg : max),
+            count: tot, dept: ex.dept || dept, level: ex.level || level
+          };
+        } else {
+          salByRole[role] = { mean: avg, min: isNaN(min)||min===0 ? avg : min,
+            max: isNaN(max)||max===0 ? avg : max, count, dept, level };
+        }
       }
       // Build rolesByDept — only if dept is a real value (not #N/A etc.)
       if (dept) {
@@ -806,10 +818,14 @@ function populateDropdowns() {
   levelEl.innerHTML  = '<option value="">Select level</option>';
   regionEl.innerHTML = '<option value="">Select region</option>';
 
-  // Merge depts from both models
+  // Merge depts — use hiring sheet name as canonical, skip emp depts that are just a case variant
   const empDepts = EMP_MODEL ? EMP_MODEL.allDepts : [];
-  const allDepts = [...new Set([...MODEL.depts, ...empDepts])].sort();
-  allDepts.forEach(d => addOption(deptEl, d, d));
+  const allDepts = [...MODEL.depts];
+  empDepts.forEach(ed => {
+    if (!MODEL.depts.some(hd => hd.toLowerCase().trim() === ed.toLowerCase().trim()))
+      allDepts.push(ed);
+  });
+  allDepts.sort().forEach(d => addOption(deptEl, d, d));
 
   // Level order
   const levelOrder = ['Junior','Mid','Senior','Strategic Lead','Director','Principal'];
@@ -832,7 +848,11 @@ function onDeptChange() {
   roleEl.innerHTML = '';
 
   const hiringRoles = (dept && MODEL.rolesByDept[dept]) ? MODEL.rolesByDept[dept] : {};
-  const empRolesRaw = (dept && EMP_MODEL && EMP_MODEL.rolesByDept[dept]) ? EMP_MODEL.rolesByDept[dept] : [];
+  // Case-insensitive dept match for employee roles (handles minor naming differences between sheets)
+  const empDeptKey  = dept && EMP_MODEL
+    ? Object.keys(EMP_MODEL.rolesByDept).find(d => d.toLowerCase().trim() === dept.toLowerCase().trim())
+    : null;
+  const empRolesRaw = empDeptKey ? EMP_MODEL.rolesByDept[empDeptKey] : [];
 
   // Merge by exact name — names are consistent across both sheets
   const allRoleNames = [...new Set([...Object.keys(hiringRoles), ...empRolesRaw])].sort();
@@ -979,7 +999,7 @@ function runPrediction() {
   // Current Team Salary card
   const empCard = document.getElementById('emp-sal-card');
   if (EMP_MODEL && roleName) {
-    // Match using module-level normRole / stripLevel / rolesMatch
+      // Match using module-level normRole / rolesMatch (exact → normalised → level-stripped)
     const roleKey = Object.keys(EMP_MODEL.salByRole).find(k => rolesMatch(k, roleName));
     const empData = roleKey ? EMP_MODEL.salByRole[roleKey] : null;
     if (empData && !isNaN(empData.mean) && empData.mean > 0) {
